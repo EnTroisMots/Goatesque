@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>PyroSentinel - Historique Cartographique & Analytics</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        /* Badge compteur affiché à côté du marqueur */
+        .unit-marker-icon {
+            background: transparent;
+            border: none;
+        }
+        .unit-marker-badge {
+            position: absolute;
+            top: -8px;
+            right: -12px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 4px;
+            border-radius: 9px;
+            background: #1f2937;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 18px;
+            text-align: center;
+            border: 2px solid #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- En-tête -->
+    <header class="bg-gray-900 text-white p-3 shadow-md flex justify-between items-center z-20">
+        <div class="flex items-center space-x-2">
+            <span class="text-2xl">⏳</span>
+            <h1 class="text-lg font-bold">PyroSentinel - Rembobinage & Analytics Tactiques</h1>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button onclick="toggleTable()" id="btn-toggle-table" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-sm font-semibold transition">
+                📊 Afficher/Masquer le tableau
+            </button>
+            <a href="index.html" class="bg-red-700 hover:bg-red-800 px-3 py-1.5 rounded text-sm font-semibold transition">← Temps Réel</a>
+        </div>
+    </header>
+
+    <!-- Barre de filtres temporels flottante -->
+    <div class="bg-white/95 backdrop-blur p-3 shadow-md flex flex-wrap gap-3 items-end z-20 border-b border-gray-200">
+        <div>
+            <label class="block text-xs font-semibold text-gray-700 mb-1">ID Unité (optionnel)</label>
+            <input type="text" id="filter-unit" placeholder="Ex: BALISE-01" class="border rounded px-3 py-1 text-sm w-36">
+        </div>
+        <div>
+            <label class="block text-xs font-semibold text-gray-700 mb-1">Date spécifique</label>
+            <input type="date" id="filter-date" class="border rounded px-3 py-1 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs font-semibold text-gray-700 mb-1">Heure précise</label>
+            <input type="time" id="filter-time" class="border rounded px-3 py-1 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs font-semibold text-gray-700 mb-1">Marge / Tolérance</label>
+            <select id="filter-tolerance" class="border rounded px-2 py-1 text-sm bg-white">
+                <option value="0">Exacte (±0 min)</option>
+                <option value="5_m">± 5 minutes</option>
+                <option value="15_m">± 15 minutes</option>
+                <option value="30_m">± 30 minutes</option>
+                <option value="1_h">± 1 heure</option>
+                <option value="2_h">± 2 heures</option>
+                <option value="6_h">± 6 heures</option>
+                <option value="12_h">± 12 heures</option>
+                <option value="1_d">± 1 jour</option>
+                <option value="3_d">± 3 jours</option>
+                <option value="7_d">± 7 jours</option>
+            </select>
+        </div>
+        <button onclick="loadHistoryData()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1 rounded text-sm font-semibold shadow transition">
+            Appliquer le filtre
+        </button>
+        <button onclick="resetFilters()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-3 py-1 rounded text-sm font-semibold transition">
+            Réinitialiser (Dernière heure)
+        </button>
+    </div>
+
+    <!-- Contenu Principal -->
+    <div class="flex-1 relative flex overflow-hidden">
+        <!-- La Carte -->
+        <div id="history-map" class="absolute inset-0 z-0"></div>
+
+        <!-- Volet Latéral : Fiche de Détail d'une Balise -->
+        <div id="unit-detail-panel" class="absolute right-0 top-0 bottom-0 w-96 bg-white/95 backdrop-blur shadow-2xl z-20 flex flex-col transform translate-x-full transition-transform duration-300 border-l border-gray-300 overflow-y-auto">
+            <div class="p-4 bg-gray-900 text-white flex justify-between items-center sticky top-0 z-10 shadow">
+                <div>
+                    <h2 class="font-bold text-base flex items-center gap-2">
+                        <span>📡 Fiche Balise :</span>
+                        <span id="detail-unit-title" class="text-blue-400">---</span>
+                    </h2>
+                    <p class="text-xs text-gray-400" id="detail-unit-subtitle">Chargement des données...</p>
+                </div>
+                <button onclick="closeUnitDetail()" class="text-gray-400 hover:text-white font-bold text-xl">&times;</button>
+            </div>
+
+            <div class="p-4 space-y-4">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500 uppercase">Niveau de Batterie</span>
+                        <span id="detail-battery-val" class="font-bold text-sm text-green-600">-- %</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="detail-battery-bar" class="bg-green-500 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 text-center">
+                    <div class="bg-blue-50 border border-blue-100 p-2 rounded">
+                        <span class="block text-xs text-blue-600 font-medium">Monoxyde CO</span>
+                        <span id="detail-co" class="text-lg font-bold text-blue-900">-- ppm</span>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-100 p-2 rounded">
+                        <span class="block text-xs text-amber-600 font-medium">Temp. Air / Sol</span>
+                        <span id="detail-temp" class="text-sm font-bold text-amber-900">-- / -- °C</span>
+                    </div>
+                    <div class="bg-teal-50 border border-teal-100 p-2 rounded">
+                        <span class="block text-xs text-teal-600 font-medium">Humidité</span>
+                        <span id="detail-humidity" class="text-lg font-bold text-teal-900">-- %</span>
+                    </div>
+                    <div class="bg-purple-50 border border-purple-100 p-2 rounded">
+                        <span class="block text-xs text-purple-600 font-medium">Vent</span>
+                        <span id="detail-wind" class="text-lg font-bold text-purple-900">-- km/h</span>
+                    </div>
+                </div>
+
+                <button id="btn-filter-history" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm font-bold shadow flex items-center justify-center gap-2 transition">
+                    🔍 Isoler tout son historique sur la carte
+                </button>
+
+                <hr class="border-gray-200">
+
+                <div>
+                    <h3 class="text-xs font-bold text-gray-700 uppercase mb-2">📈 Évolution CO (ppm)</h3>
+                    <div class="bg-gray-900 rounded p-2 text-center">
+                        <canvas id="chart-co" width="300" height="120" class="w-full"></canvas>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="text-xs font-bold text-gray-700 uppercase mb-2">🌡️ Évolution Température Air (°C)</h3>
+                    <div class="bg-gray-900 rounded p-2 text-center">
+                        <canvas id="chart-temp" width="300" height="120" class="w-full"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tableau escamotable -->
+        <div id="table-panel" class="absolute left-0 top-0 bottom-0 w-1/2 bg-white/95 backdrop-blur shadow-2xl z-10 flex flex-col transform -translate-x-full transition-transform duration-300 border-r border-gray-300">
+            <div class="p-4 bg-gray-800 text-white flex justify-between items-center">
+                <h2 class="font-bold text-sm">📋 Données tabulaires de la sélection</h2>
+                <button onclick="toggleTable()" class="text-gray-400 hover:text-white font-bold text-lg">&times;</button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-700 text-xs uppercase font-semibold">
+                            <th class="p-2">Horodatage</th>
+                            <th class="p-2">Unité</th>
+                            <th class="p-2">CO</th>
+                            <th class="p-2">Air</th>
+                            <th class="p-2">Criticité</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table-body" class="divide-y divide-gray-200 text-sm">
+                        <tr><td colspan="5" class="p-4 text-center text-gray-400">Aucune donnée chargée.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('history-map').setView([45.1885, 5.7245], 13);
+        
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
+
+        let historyMarkers = [];
+        let currentLoadedData = [];
+
+        function clearMarkers() {
+            historyMarkers.forEach(marker => map.removeLayer(marker));
+            historyMarkers = [];
+        }
+
+        function getMarkerColor(criticite) {
+            if (criticite === 'ROUGE') return '#ef4444';
+            if (criticite === 'JAUNE') return '#eab308';
+            return '#22c55e';
+        }
+
+        function toggleTable() {
+            const panel = document.getElementById('table-panel');
+            panel.classList.toggle('-translate-x-full');
+        }
+
+        function closeUnitDetail() {
+            document.getElementById('unit-detail-panel').classList.add('translate-x-full');
+        }
+
+        function resetFilters() {
+            document.getElementById('filter-unit').value = '';
+            document.getElementById('filter-date').value = '';
+            document.getElementById('filter-time').value = '';
+            document.getElementById('filter-tolerance').value = '0';
+            closeUnitDetail();
+            loadHistoryData();
+        }
+
+        window.filterByUnit = function(unitId) {
+            document.getElementById('filter-unit').value = unitId;
+            document.getElementById('filter-date').value = '';
+            document.getElementById('filter-time').value = '';
+            document.getElementById('filter-tolerance').value = '0';
+            closeUnitDetail();
+            loadHistoryData();
+        };
+
+        function showUnitDetails(unitId) {
+            const unitMeasures = currentLoadedData.filter(m => m.unit_id === unitId);
+            if (!unitMeasures || unitMeasures.length === 0) return;
+
+            unitMeasures.sort((a, b) => new Date(a.timestamp.replace(' ', 'T')) - new Date(b.timestamp.replace(' ', 'T')));
+            const latest = unitMeasures[unitMeasures.length - 1];
+
+            document.getElementById('detail-unit-title').textContent = unitId;
+            document.getElementById('detail-unit-subtitle').textContent = `Dernier relevé : ${latest.timestamp}`;
+            
+            const battery = latest.battery_level ?? 100;
+            document.getElementById('detail-battery-val').textContent = `${battery}%`;
+            const batteryBar = document.getElementById('detail-battery-bar');
+            batteryBar.style.width = `${battery}%`;
+            batteryBar.className = battery < 20 ? 'bg-red-500 h-2.5 rounded-full' : (battery < 50 ? 'bg-yellow-500 h-2.5 rounded-full' : 'bg-green-500 h-2.5 rounded-full');
+
+            document.getElementById('detail-co').textContent = `${latest.co ?? 'N/A'} ppm`;
+            document.getElementById('detail-temp').textContent = `${latest.temperature_air ?? 'N/A'}° / ${latest.temperature_sol ?? 'N/A'}°`;
+            document.getElementById('detail-humidity').textContent = `${latest.humidite ?? 'N/A'} %`;
+            document.getElementById('detail-wind').textContent = `${latest.wind_speed ?? 'N/A'} km/h`;
+
+            const btnFilter = document.getElementById('btn-filter-history');
+            btnFilter.onclick = () => window.filterByUnit(unitId);
+
+            drawSimpleChart('chart-co', unitMeasures.map(m => m.co ?? 0), '#ef4444');
+            drawSimpleChart('chart-temp', unitMeasures.map(m => m.temperature_air ?? 0), '#f59e0b');
+
+            document.getElementById('unit-detail-panel').classList.remove('translate-x-full');
+        }
+
+        function drawSimpleChart(canvasId, values, lineColor) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            ctx.clearRect(0, 0, w, h);
+            if (values.length < 2) {
+                ctx.fillStyle = '#9ca3af';
+                ctx.font = '12px sans-serif';
+                ctx.fillText('Pas assez de points pour tracer la courbe', 40, h / 2);
+                return;
+            }
+
+            const min = Math.min(...values);
+            const max = Math.max(...values) || 1;
+            const range = max - min || 1;
+
+            ctx.beginPath();
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = 2;
+
+            values.forEach((val, i) => {
+                const x = (i / (values.length - 1)) * (w - 20) + 10;
+                const y = h - 15 - ((val - min) / range) * (h - 30);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+
+                ctx.fillStyle = lineColor;
+                ctx.fillRect(x - 2, y - 2, 4, 4);
+            });
+            ctx.stroke();
+        }
+
+        function formatLocalDateTime(d) {
+            const pad = (n) => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        }
+
+        function getToleranceInMs(toleranceVal) {
+            if (toleranceVal === '0') return 0;
+            const parts = toleranceVal.split('_');
+            const num = parseInt(parts[0], 10);
+            const unit = parts[1];
+
+            if (unit === 'm') return num * 60 * 1000;
+            if (unit === 'h') return num * 60 * 60 * 1000;
+            if (unit === 'd') return num * 24 * 60 * 60 * 1000;
+            return 0;
+        }
+
+        /**
+         * Construit un marqueur "unité" unique :
+         * - cercle coloré selon la criticité de la DERNIÈRE mesure
+         * - badge numérique indiquant le NOMBRE TOTAL de mesures de la balise
+         */
+        function createUnitMarker(unitId, latestMeasure, count) {
+            const color = getMarkerColor(latestMeasure.criticite);
+
+            // Icône composite : cercle + badge compteur
+            const iconHtml = `
+                <div style="position: relative; width: 24px; height: 24px;">
+                    <div style="
+                        width: 24px; height: 24px; border-radius: 50%;
+                        background: ${color};
+                        border: 2px solid #000;
+                        opacity: 0.9;
+                        box-shadow: 0 0 0 2px #fff inset;
+                    "></div>
+                    <span class="unit-marker-badge">${count}</span>
+                </div>
+            `;
+
+            const icon = L.divIcon({
+                className: 'unit-marker-icon',
+                html: iconHtml,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12],
+                popupAnchor: [0, -12]
+            });
+
+            const popupContent = `
+                <div class="text-sm">
+                    <b>Unité :</b> 
+                    <span class="unit-click-btn text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer" data-unit="${unitId}">
+                        ${unitId}
+                    </span>
+                    <span class="bg-blue-100 text-blue-800 text-xs px-1.5 py-0.5 rounded ml-1">#${count} mesures</span><br>
+                    <b>Dernier horodatage :</b> ${latestMeasure.timestamp}<br>
+                    <b>CO :</b> ${latestMeasure.co ?? 'N/A'} ppm<br>
+                    <b>Air :</b> ${latestMeasure.temperature_air ?? 'N/A'}°C<br>
+                    <b>Criticité :</b> <span style="color:${color}; font-weight:bold;">${latestMeasure.criticite}</span>
+                </div>
+            `;
+
+            const marker = L.marker([latestMeasure.latitude, latestMeasure.longitude], { icon })
+                .addTo(map)
+                .bindPopup(popupContent);
+
+            marker.on('popupopen', function() {
+                const popupNode = marker.getPopup().getElement();
+                const btn = popupNode.querySelector('.unit-click-btn');
+                if (btn) {
+                    btn.onclick = function() {
+                        showUnitDetails(unitId);
+                    };
+                }
+            });
+
+            return marker;
+        }
+
+        async function loadHistoryData() {
+            const unit = document.getElementById('filter-unit').value;
+            const dateInput = document.getElementById('filter-date').value;
+            const timeInput = document.getElementById('filter-time').value;
+            const toleranceVal = document.getElementById('filter-tolerance').value;
+
+            let startDate = '';
+            let endDate = '';
+
+            const now = new Date();
+
+            if (!unit && !dateInput && !timeInput) {
+                let pastHour = new Date(now.getTime() - 60 * 60 * 1000);
+                startDate = formatLocalDateTime(pastHour);
+            } else if (dateInput && !timeInput) {
+                let baseStart = new Date(`${dateInput}T00:00:00`);
+                let baseEnd = new Date(`${dateInput}T23:59:59`);
+                let toleranceMs = getToleranceInMs(toleranceVal);
+
+                startDate = formatLocalDateTime(new Date(baseStart.getTime() - toleranceMs));
+                endDate = formatLocalDateTime(new Date(baseEnd.getTime() + toleranceMs));
+            } else if (timeInput) {
+                let dateStr = dateInput || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                let targetDateTime = new Date(`${dateStr}T${timeInput}:00`);
+                let toleranceMs = getToleranceInMs(toleranceVal);
+
+                if (toleranceMs === 0) {
+                    startDate = formatLocalDateTime(targetDateTime);
+                    endDate = formatLocalDateTime(new Date(targetDateTime.getTime() + 59 * 1000));
+                } else {
+                    startDate = formatLocalDateTime(new Date(targetDateTime.getTime() - toleranceMs));
+                    endDate = formatLocalDateTime(new Date(targetDateTime.getTime() + toleranceMs));
+                }
+            }
+
+            let url = `http://localhost:8000/api/measures/history?`;
+            if (unit) url += `unit_id=${encodeURIComponent(unit)}&`;
+            if (startDate) url += `start_date=${encodeURIComponent(startDate)}&`;
+            if (endDate) url += `end_date=${encodeURIComponent(endDate)}&`;
+
+            try {
+                let response = await fetch(url);
+                let data = await response.json();
+                currentLoadedData = data;
+                
+                const tbody = document.getElementById('history-table-body');
+                tbody.innerHTML = '';
+                clearMarkers();
+
+                if (data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-400">Aucune donnée pour cette sélection.</td></tr>`;
+                    return;
+                }
+
+                // 1) Remplir le tableau (toutes les mesures, comme avant)
+                data.forEach(m => {
+                    let measureDate = new Date(m.timestamp.replace(' ', 'T'));
+                    let diffMinutes = (now - measureDate) / (1000 * 60);
+
+                    if (!unit && !dateInput && !timeInput && diffMinutes > 60) {
+                        return;
+                    }
+
+                    let badgeColor = 'bg-green-100 text-green-800';
+                    if (m.criticite === 'ROUGE') badgeColor = 'bg-red-100 text-red-800 font-bold';
+                    else if (m.criticite === 'JAUNE') badgeColor = 'bg-yellow-100 text-yellow-800';
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="p-2 text-xs text-gray-600">${m.timestamp}</td>
+                        <td class="p-2 font-medium text-gray-900">${m.unit_id}</td>
+                        <td class="p-2 text-gray-600">${m.co ?? 'N/A'}</td>
+                        <td class="p-2 text-gray-600">${m.temperature_air ?? 'N/A'}°C</td>
+                        <td class="p-2"><span class="px-2 py-0.5 rounded text-xs ${badgeColor}">${m.criticite}</span></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                // 2) Regrouper par unité pour n'afficher QU'UN marqueur par balise
+                const groupsByUnit = {};
+                data.forEach(m => {
+                    if (m.latitude === null || m.longitude === null) return;
+
+                    // Même filtre temporel que le tableau (dernière heure par défaut)
+                    let measureDate = new Date(m.timestamp.replace(' ', 'T'));
+                    let diffMinutes = (now - measureDate) / (1000 * 60);
+                    if (!unit && !dateInput && !timeInput && diffMinutes > 60) return;
+
+                    if (!groupsByUnit[m.unit_id]) groupsByUnit[m.unit_id] = [];
+                    groupsByUnit[m.unit_id].push(m);
+                });
+
+                Object.keys(groupsByUnit).forEach(unitId => {
+                    const measures = groupsByUnit[unitId];
+                    // Tri chronologique croissant
+                    measures.sort((a, b) =>
+                        new Date(a.timestamp.replace(' ', 'T')) - new Date(b.timestamp.replace(' ', 'T'))
+                    );
+                    const latest = measures[measures.length - 1];
+                    const count = measures.length;
+
+                    const marker = createUnitMarker(unitId, latest, count);
+                    historyMarkers.push(marker);
+                });
+
+            } catch (e) {
+                console.error("Erreur chargement historique:", e);
+            }
+        }
+
+        // Prise en charge automatique de l'ID d'unité transmis dans l'URL (?unit_id=...)
+        const urlParams = new URLSearchParams(window.location.search);
+        const unitParam = urlParams.get('unit_id');
+        if (unitParam) {
+            document.getElementById('filter-unit').value = unitParam;
+        }
+
+        loadHistoryData();
+    </script>
+</body>
+</html>

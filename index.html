@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>PyroSentinel - PyroMap (Temps Réel)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- En-tête -->
+    <header class="bg-red-900 text-white p-4 shadow-md flex justify-between items-center z-20">
+        <div class="flex items-center space-x-2">
+            <span class="text-2xl">🔥</span>
+            <h1 class="text-xl font-bold">PyroSentinel - PyroMap (Temps Réel)</h1>
+        </div>
+        <div class="flex items-center space-x-3">
+            <a href="history.html" class="bg-blue-600 px-3 py-1 rounded text-sm hover:bg-blue-700 font-medium transition">📜 Historique Carte</a>
+            <div id="ws-status" class="px-3 py-1 rounded text-sm bg-yellow-500 text-black font-semibold">
+                Connexion WebSocket...
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenu principal -->
+    <div class="flex flex-1 overflow-hidden relative">
+        <!-- La Carte -->
+        <div id="map" class="flex-1 h-full z-0"></div>
+
+        <!-- Panneau latéral principal : Flux d'Alertes ROUGE -->
+        <aside class="w-96 bg-white border-l border-gray-200 p-4 flex flex-col shadow-lg overflow-y-auto z-10">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-lg font-bold text-gray-800 flex items-center">
+                    <span>🚨 Flux d'Alertes ROUGE</span>
+                </h2>
+                <span id="alert-count-badge" class="bg-red-100 text-red-800 text-xs font-bold px-2 py-0.5 rounded-full hidden">0</span>
+            </div>
+            <div id="alerts-container" class="space-y-3 flex-1">
+                <p id="no-alerts-msg" class="text-gray-400 text-sm italic">En attente d'événements critiques...</p>
+            </div>
+        </aside>
+
+        <!-- Volet latéral coulissant : Fiche Balise (masqué par défaut) -->
+        <div id="unit-detail-panel" class="absolute right-0 top-0 bottom-0 w-96 bg-white/95 backdrop-blur shadow-2xl z-20 flex flex-col transform translate-x-full transition-transform duration-300 border-l border-gray-300 overflow-y-auto">
+            <div class="p-4 bg-gray-900 text-white flex justify-between items-center sticky top-0 z-10 shadow">
+                <div>
+                    <h2 class="font-bold text-base flex items-center gap-2">
+                        <span>📡 Fiche Balise :</span>
+                        <span id="detail-unit-title" class="text-blue-400">---</span>
+                    </h2>
+                    <p class="text-xs text-gray-400" id="detail-unit-subtitle">Chargement des données...</p>
+                </div>
+                <button onclick="closeUnitDetail()" class="text-gray-400 hover:text-white font-bold text-xl cursor-pointer">&times;</button>
+            </div>
+
+            <div class="p-4 space-y-4">
+                <!-- Statut Batterie -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500 uppercase">Niveau de Batterie</span>
+                        <span id="detail-battery-val" class="font-bold text-sm text-green-600">-- %</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="detail-battery-bar" class="bg-green-500 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Métriques Récentes -->
+                <div class="grid grid-cols-2 gap-2 text-center">
+                    <div class="bg-blue-50 border border-blue-100 p-2 rounded">
+                        <span class="block text-xs text-blue-600 font-medium">Monoxyde CO</span>
+                        <span id="detail-co" class="text-lg font-bold text-blue-900">-- ppm</span>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-100 p-2 rounded">
+                        <span class="block text-xs text-amber-600 font-medium">Temp. Air / Sol</span>
+                        <span id="detail-temp" class="text-sm font-bold text-amber-900">-- / -- °C</span>
+                    </div>
+                    <div class="bg-teal-50 border border-teal-100 p-2 rounded">
+                        <span class="block text-xs text-teal-600 font-medium">Humidité</span>
+                        <span id="detail-humidity" class="text-lg font-bold text-teal-900">-- %</span>
+                    </div>
+                    <div class="bg-purple-50 border border-purple-100 p-2 rounded">
+                        <span class="block text-xs text-purple-600 font-medium">Vent</span>
+                        <span id="detail-wind" class="text-lg font-bold text-purple-900">-- km/h</span>
+                    </div>
+                </div>
+
+                <!-- Tableau historique rapide -->
+                <div>
+                    <h3 class="text-xs font-bold text-gray-700 uppercase mb-2">📜 Derniers relevés de cette balise</h3>
+                    <div class="max-h-44 overflow-y-auto border border-gray-200 rounded text-xs">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-gray-100 text-gray-600 sticky top-0">
+                                <tr>
+                                    <th class="p-1.5 border-b">Horodatage</th>
+                                    <th class="p-1.5 border-b">CO</th>
+                                    <th class="p-1.5 border-b">Temp</th>
+                                    <th class="p-1.5 border-b">État</th>
+                                </tr>
+                            </thead>
+                            <tbody id="unit-history-list" class="divide-y divide-gray-100">
+                                <tr><td colspan="4" class="p-2 text-center text-gray-400">Chargement...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Bouton vers la carte d'historique -->
+                <a id="btn-open-history" href="#" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm font-bold shadow flex items-center justify-center gap-2 transition">
+                    📍 Voir tout son tracé sur la carte d'historique
+                </a>
+
+                <hr class="border-gray-200">
+
+                <!-- Graphiques Canvas classiques -->
+                <div>
+                    <h3 class="text-xs font-bold text-gray-700 uppercase mb-2">📈 Évolution du CO (ppm)</h3>
+                    <div class="bg-gray-900 rounded p-2 text-center">
+                        <canvas id="chart-co" width="300" height="100" class="w-full"></canvas>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="text-xs font-bold text-gray-700 uppercase mb-2">🌡️ Évolution Température Air (°C)</h3>
+                    <div class="bg-gray-900 rounded p-2 text-center">
+                        <canvas id="chart-temp" width="300" height="100" class="w-full"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('map').setView([45.1885, 5.7245], 13);
+        
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
+
+        var markers = {};
+        var currentMeasuresMap = {};
+        var activeRedAlerts = {};
+
+        function getMarkerColor(criticite) {
+            if (criticite === 'ROUGE') return '#ef4444';
+            if (criticite === 'JAUNE') return '#eab308';
+            return '#22c55e';
+        }
+
+        function closeUnitDetail() {
+            document.getElementById('unit-detail-panel').classList.add('translate-x-full');
+        }
+
+        // ==========================================
+        // GESTION DU FLUX D'ALERTES DYNAMIQUE
+        // ==========================================
+
+        function processRedAlert(data) {
+            const alertsContainer = document.getElementById('alerts-container');
+            const noAlertsMsg = document.getElementById('no-alerts-msg');
+
+            if (noAlertsMsg) noAlertsMsg.classList.add('hidden');
+
+            if (activeRedAlerts[data.unit_id]) {
+                activeRedAlerts[data.unit_id].element.remove();
+            }
+
+            const alertCard = document.createElement('div');
+            alertCard.className = "p-3 bg-red-50 border-l-4 border-red-500 text-red-700 rounded shadow text-sm animate-pulse cursor-pointer hover:bg-red-100 transition";
+            alertCard.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <strong>🔥 ALERTE ROUGE DÉTECTÉE !</strong>
+                    <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-mono">EN COURS</span>
+                </div>
+                <strong>Unité :</strong> ${data.unit_id}<br>
+                <strong>CO :</strong> ${data.co ?? 'N/A'} ppm | <strong>Air :</strong> ${data.temperature_air ?? 'N/A'}°C<br>
+                <span class="text-xs text-gray-500">${data.timestamp}</span>
+            `;
+            alertCard.onclick = () => showUnitDetails(data);
+
+            alertsContainer.prepend(alertCard);
+            activeRedAlerts[data.unit_id] = {
+                data: data,
+                timestampDate: new Date(data.timestamp.replace(' ', 'T')),
+                element: alertCard
+            };
+
+            updateAlertBadge();
+        }
+
+        function removeRedAlert(unitId) {
+            if (activeRedAlerts[unitId]) {
+                activeRedAlerts[unitId].element.remove();
+                delete activeRedAlerts[unitId];
+                updateAlertBadge();
+            }
+        }
+
+        function cleanExpiredAlerts() {
+            const now = new Date();
+            Object.keys(activeRedAlerts).forEach(unitId => {
+                const alertDate = activeRedAlerts[unitId].timestampDate;
+                const diffMinutes = (now - alertDate) / (1000 * 60);
+                if (diffMinutes > 60) {
+                    removeRedAlert(unitId);
+                }
+            });
+        }
+
+        function updateAlertBadge() {
+            const count = Object.keys(activeRedAlerts).length;
+            const badge = document.getElementById('alert-count-badge');
+            const noAlertsMsg = document.getElementById('no-alerts-msg');
+
+            if (count > 0) {
+                badge.textContent = count;
+                badge.classList.remove('hidden');
+                if (noAlertsMsg) noAlertsMsg.classList.add('hidden');
+            } else {
+                badge.classList.add('hidden');
+                if (noAlertsMsg) noAlertsMsg.classList.remove('hidden');
+            }
+        }
+
+        setInterval(cleanExpiredAlerts, 30000);
+
+        // ==========================================
+        // DÉTAILS BALISE ET FICHE LATÉRALE
+        // ==========================================
+
+        async function showUnitDetails(m) {
+            document.getElementById('detail-unit-title').textContent = m.unit_id;
+            document.getElementById('detail-unit-subtitle').textContent = `Dernière mise à jour : ${m.timestamp}`;
+
+            const battery = m.battery_level ?? 100;
+            document.getElementById('detail-battery-val').textContent = `${battery}%`;
+            const batteryBar = document.getElementById('detail-battery-bar');
+            batteryBar.style.width = `${battery}%`;
+            batteryBar.className = battery < 20 ? 'bg-red-500 h-2.5 rounded-full' : (battery < 50 ? 'bg-yellow-500 h-2.5 rounded-full' : 'bg-green-500 h-2.5 rounded-full');
+
+            document.getElementById('detail-co').textContent = `${m.co !== null ? m.co + ' ppm' : 'N/A'}`;
+            document.getElementById('detail-temp').textContent = `${m.temperature_air ?? 'N/A'}° / ${m.temperature_sol ?? 'N/A'}°`;
+            document.getElementById('detail-humidity').textContent = `${m.humidite ?? 'N/A'} %`;
+            document.getElementById('detail-wind').textContent = `${m.wind_speed ?? 'N/A'} km/h`;
+
+            document.getElementById('btn-open-history').href = `history.html?unit_id=${encodeURIComponent(m.unit_id)}`;
+
+            try {
+                let res = await fetch(`http://localhost:8000/api/measures/history?unit_id=${encodeURIComponent(m.unit_id)}`);
+                let historyData = await res.json();
+                
+                const historyList = document.getElementById('unit-history-list');
+                if (historyData.length === 0) {
+                    historyList.innerHTML = `<tr><td colspan="4" class="p-2 text-center text-gray-400">Aucun historique disponible.</td></tr>`;
+                } else {
+                    historyList.innerHTML = historyData.slice(0, 15).map(h => {
+                        let criticiteClass = h.criticite === 'ROUGE' ? 'text-red-600 font-bold' : (h.criticite === 'JAUNE' ? 'text-yellow-600' : 'text-green-600');
+                        return `
+                            <tr class="hover:bg-gray-50">
+                                <td class="p-1.5 text-gray-500 font-mono text-[10px]">${h.timestamp.split(' ')[1] || h.timestamp}</td>
+                                <td class="p-1.5 font-semibold text-gray-700">${h.co ?? 'N/A'} ppm</td>
+                                <td class="p-1.5 text-gray-700">${h.temperature_air ?? 'N/A'}°C</td>
+                                <td class="p-1.5 ${criticiteClass}">${h.criticite}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+                historyData.sort((a, b) => new Date(a.timestamp.replace(' ', 'T')) - new Date(b.timestamp.replace(' ', 'T')));
+                drawSimpleChart('chart-co', historyData.map(d => d.co ?? 0), '#ef4444');
+                drawSimpleChart('chart-temp', historyData.map(d => d.temperature_air ?? 0), '#f59e0b');
+            } catch (e) {
+                console.error("Erreur chargement historique :", e);
+            }
+
+            document.getElementById('unit-detail-panel').classList.remove('translate-x-full');
+        }
+
+        function drawSimpleChart(canvasId, values, lineColor) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            ctx.clearRect(0, 0, w, h);
+            if (values.length < 2) {
+                ctx.fillStyle = '#9ca3af';
+                ctx.font = '12px sans-serif';
+                ctx.fillText('Pas assez de points pour tracer la courbe', 40, h / 2);
+                return;
+            }
+
+            const min = Math.min(...values);
+            const max = Math.max(...values) || 1;
+            const range = max - min || 1;
+
+            ctx.beginPath();
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = 2;
+
+            values.forEach((val, i) => {
+                const x = (i / (values.length - 1)) * (w - 20) + 10;
+                const y = h - 15 - ((val - min) / range) * (h - 30);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+
+                ctx.fillStyle = lineColor;
+                ctx.fillRect(x - 2, y - 2, 4, 4);
+            });
+            ctx.stroke();
+        }
+
+        // ==========================================
+        // MISE À JOUR CARTE & WEBSOCKET
+        // ==========================================
+
+        function updateMapMarker(m) {
+            if (m.latitude !== null && m.longitude !== null) {
+                currentMeasuresMap[m.unit_id] = m;
+                let color = getMarkerColor(m.criticite);
+
+                // Traitement dynamique selon la criticité
+                if (m.criticite === 'ROUGE') {
+                    processRedAlert(m);
+                } else {
+                    removeRedAlert(m.unit_id);
+                }
+
+                let popupContent = `
+                    <div class="text-sm">
+                        <b>Unité :</b> 
+                        <span class="unit-click-btn text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer" data-unit="${m.unit_id}">
+                            ${m.unit_id}
+                        </span><br>
+                        <b>Mode :</b> ${m.mode}<br>
+                        <b>CO :</b> ${m.co !== null ? m.co + ' ppm' : 'N/A'}<br>
+                        <b>Temp Air :</b> ${m.temperature_air !== null ? m.temperature_air + '°C' : 'N/A'}<br>
+                        <b>Criticité :</b> <span style="color:${color}; font-weight:bold;">${m.criticite}</span>
+                    </div>
+                `;
+                
+                if (markers[m.unit_id]) {
+                    markers[m.unit_id].setLatLng([m.latitude, m.longitude]);
+                    markers[m.unit_id].setStyle({ fillColor: color, color: '#000' });
+                    markers[m.unit_id].setPopupContent(popupContent);
+                } else {
+                    let marker = L.circleMarker([m.latitude, m.longitude], {
+                        radius: 12,
+                        fillColor: color,
+                        color: "#000",
+                        weight: 1.5,
+                        opacity: 1,
+                        fillOpacity: 0.85
+                    }).addTo(map).bindPopup(popupContent);
+
+                    marker.on('popupopen', function() {
+                        const popupNode = marker.getPopup().getElement();
+                        const btn = popupNode.querySelector('.unit-click-btn');
+                        if (btn) {
+                            btn.onclick = function() {
+                                showUnitDetails(currentMeasuresMap[m.unit_id] || m);
+                            };
+                        }
+                    });
+
+                    markers[m.unit_id] = marker;
+                }
+            }
+        }
+
+        async function loadLatestMeasures() {
+            try {
+                let response = await fetch('http://localhost:8000/api/measures/latest');
+                let measures = await response.json();
+                
+                const now = new Date();
+                measures.forEach(m => {
+                    if (m.timestamp) {
+                        let measureDate = new Date(m.timestamp.replace(' ', 'T'));
+                        let diffMinutes = (now - measureDate) / (1000 * 60);
+                        if (diffMinutes <= 60) {
+                            updateMapMarker(m);
+                        } else {
+                            removeRedAlert(m.unit_id);
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error("Erreur chargement mesures :", e);
+            }
+        }
+
+        function connectWebSocket() {
+            const wsStatus = document.getElementById('ws-status');
+            const ws = new WebSocket('ws://localhost:8000/ws/alerts');
+
+            ws.onopen = () => {
+                wsStatus.textContent = "Connecté (Temps Réel)";
+                wsStatus.className = "px-3 py-1 rounded text-sm bg-green-500 text-white font-semibold";
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                const data = message.data || message;
+                if (data && data.unit_id) {
+                    updateMapMarker(data);
+                }
+            };
+
+            ws.onclose = () => {
+                wsStatus.textContent = "Déconnecté - Reconnexion...";
+                wsStatus.className = "px-3 py-1 rounded text-sm bg-red-500 text-white font-semibold";
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        loadLatestMeasures();
+        connectWebSocket();
+    </script>
+</body>
+</html>
