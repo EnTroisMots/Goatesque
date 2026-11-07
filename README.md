@@ -34,7 +34,7 @@ Ouvrez votre navigateur web à l'adresse [http://127.0.0.1:8000/docs](http://127
 
 ---
 
-### 4. Lancer le simulateur de données (Optionnel, ça sert pas a grand chose mis a par pour faire des copier coller de test et les mettre dans Swagger UI)
+### 4. Lancer le simulateur de données (Optionnel, ça ne sert pas à grand-chose, à part pour faire des copier-coller de tests et les mettre dans Swagger UI.)
 
 Pour générer et envoyer automatiquement des données de test (balises et alertes) au backend, ouvrez un deuxième terminal et lancez :
 
